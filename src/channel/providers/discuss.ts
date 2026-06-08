@@ -52,14 +52,25 @@ export const discussProvider: ChannelProvider = {
       headers["Authorization"] = `Bearer ${cfg.apiKey}`;
     }
 
-    const resp = await fetch(webhookUrl, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
-    });
+    let resp: Response;
+    try {
+      resp = await fetch(webhookUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+      });
+    } catch (networkErr) {
+      throw new Error(`Odoo webhook reply network error: ${(networkErr as Error)?.message || String(networkErr)}`);
+    }
 
     if (!resp.ok) {
-      throw new Error(`Odoo webhook reply failed: ${resp.status} ${resp.statusText}`);
+      let body = "";
+      try {
+        body = (await resp.text()).slice(0, 500);
+      } catch {
+        // ignore body read errors
+      }
+      throw new Error(`Odoo webhook reply failed: status=${resp.status} body=${body}`);
     }
   },
 

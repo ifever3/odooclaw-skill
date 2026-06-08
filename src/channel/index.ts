@@ -361,13 +361,21 @@ async function handleInboundMessage(
   const formatFn = provider.formatOutbound ?? formatOdooRichText;
   const { dispatcher, replyOptions, markDispatchIdle } = core.channel.reply.createReplyDispatcherWithTyping({
     humanDelay: core.channel.reply.resolveHumanDelayConfig(api.config, agentId),
-    deliver: async (payload: { text?: string }) => {
+    deliver: async (payload: { text?: string }, info: { kind: "tool" | "block" | "final" }) => {
+      if (info.kind !== "final") return;
       const text = payload.text ?? "";
       if (isSystemDiagnostic(text)) return;
+      if (!text.trim()) return;
       const chunks = core.channel.text.chunkMarkdownTextWithMode(text, textLimit, chunkMode);
       for (const chunk of chunks.length > 0 ? chunks : [text]) {
         if (!chunk) continue;
-        await provider.sendMessage(cfg, channelId, formatFn(chunk), true);
+        try {
+          await provider.sendMessage(cfg, channelId, formatFn(chunk), true);
+          api.logger?.info(`odooClaw-channel reply sent ch=${channelId} kind=${chatType} len=${chunk.length}`);
+        } catch (err) {
+          api.logger?.error(`odooClaw-channel reply send failed ch=${channelId} kind=${chatType} err=${String(err)}`);
+          throw err;
+        }
       }
     },
     onError: (err: unknown, info: { kind: string }) => {
@@ -432,6 +440,11 @@ export async function handleWebhookEvent(api: OpenClawPluginApi, event: OdooWebh
 
   api.logger?.info(
     `odooClaw-channel webhook: new message ch=${channel.id} provider=${provider.id} from=${event.author.name ?? "unknown"}: ${bodyText.slice(0, 80)}`,
+  );
+
+  const botInMentioned = msg.partnerIds.includes(cfg.botPartnerId);
+  api.logger?.info(
+    `odooClaw-channel webhook context: ch=${channel.id} channelType=${channel.type} isPrivate=${channel.isPrivate} botPartnerId=${cfg.botPartnerId} botInMentioned=${botInMentioned} mentionedPartnerCount=${msg.partnerIds.length}`,
   );
 
   await handleInboundMessage(api, cfg, msg, channel, provider);
